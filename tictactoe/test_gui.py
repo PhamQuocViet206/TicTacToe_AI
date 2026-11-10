@@ -130,6 +130,70 @@ class TicTacToeGUITests(unittest.TestCase):
         self.gui._toggle_advanced_settings()
         self.assertEqual(self.gui.advanced_expanded, initial)
 
+    def test_separate_advanced_ai_settings_for_x_and_o(self):
+        self.gui.mode_var.set("AI vs AI")
+        self.gui.ai_var.set("mcts")
+        self.gui.ai_iterations_var.set("500")
+        self.gui.uct_var.set("1.25")
+        self.gui.rollout_var.set("random")
+
+        self.gui.ai_o_var.set("mcts")
+        self.gui.ai_o_iterations_var.set("2500")
+        self.gui.uct_o_var.set("2.10")
+        self.gui.rollout_o_var.set("heuristic")
+
+        # Check Player X controller
+        self.gui.game.current_player = 1
+        ctrl_x = self.gui._controller_for_current_player()
+        self.assertEqual(ctrl_x.iterations, 500)
+        self.assertAlmostEqual(ctrl_x.uct_c, 1.25)
+        self.assertEqual(ctrl_x.rollout_policy_name, "random")
+
+        # Check Player O controller
+        self.gui.game.current_player = -1
+        ctrl_o = self.gui._controller_for_current_player()
+        self.assertEqual(ctrl_o.iterations, 2500)
+        self.assertAlmostEqual(ctrl_o.uct_c, 2.10)
+        self.assertEqual(ctrl_o.rollout_policy_name, "heuristic")
+
+    def test_ai_move_timing_and_average_calculation(self):
+        self.gui.mode_var.set("AI vs AI")
+        self.gui.ai_var.set("random")
+        self.gui.ai_o_var.set("random")
+        self.gui.batch_active = True
+        self.gui.game.current_player = 1
+
+        self.gui._run_ai_turn()
+
+        # AI X move duration should have been recorded
+        self.assertEqual(len(self.gui.ai_x_move_times), 1)
+        self.assertGreater(self.gui.ai_x_move_times[0], 0.0)
+
+        avg_x, avg_o = self.gui.get_average_move_times()
+        self.assertGreater(avg_x, 0.0)
+        self.assertEqual(avg_o, 0.0)
+
+        # Result stats should include the average time
+        stats = self.gui.batch_stats_var.get()
+        self.assertIn("Thời gian TB", stats)
+
+    def test_separate_advanced_toggles_for_x_and_o(self):
+        self.gui.mode_var.set("AI vs AI")
+        self.assertFalse(self.gui.advanced_x_expanded)
+        self.assertFalse(self.gui.advanced_o_expanded)
+
+        self.gui._toggle_advanced_x()
+        self.assertTrue(self.gui.advanced_x_expanded)
+        self.assertFalse(self.gui.advanced_o_expanded)
+
+        self.gui._toggle_advanced_o()
+        self.assertTrue(self.gui.advanced_x_expanded)
+        self.assertTrue(self.gui.advanced_o_expanded)
+
+        self.gui._toggle_advanced_x()
+        self.assertFalse(self.gui.advanced_x_expanded)
+        self.assertTrue(self.gui.advanced_o_expanded)
+
 
 if __name__ == "__main__":
     unittest.main()

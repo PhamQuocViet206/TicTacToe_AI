@@ -73,7 +73,7 @@ Sau khi ứng dụng mở, bạn có thể:
 - Chọn chế độ người vs AI.
 - Chọn người đi trước cho ván thủ công/người vs AI.
 - Chọn thuật toán AI (random là AI thử nghiệm demo).
-- Chọn chế độ AI vs AI, cấu hình thuật toán riêng cho X và O, đặt số ván rồi nhấn `Start AI Matches`. Kết quả hiển thị số trận thắng và tỷ lệ thắng của X/O cùng tỷ lệ hòa; X/O và người đi trước được giữ cố định trong cả loạt.
+- Chọn chế độ AI vs AI, cấu hình thuật toán và cài đặt nâng cao riêng biệt cho cả X và O (số lần lặp MCTS, hệ số UCT c, rollout policy), đặt số ván rồi nhấn `Start AI Matches`. Kết quả hiển thị số trận thắng, tỷ lệ thắng của X/O, tỷ lệ hòa, đồng thời tính toán và in thời gian trung bình mỗi nước đi của từng AI; X/O và người đi trước được giữ cố định trong cả loạt.
 - Dùng `Stop AI Matches` hoặc `New Game` để dừng loạt.
 - Bắt đầu ván mới / undo / restart.
 
