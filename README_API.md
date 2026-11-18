@@ -68,12 +68,38 @@ heuristic_controller = AIController(algorithm="mcts", rollout_policy="heuristic"
 
 - `random_rollout(game)`: chọn ngẫu nhiên một nước đi hợp lệ.
 - `heuristic_rollout(game)`: ưu tiên thắng ngay, tiếp đến chặn thắng ngay của đối thủ, sau đó chọn ngẫu nhiên.
-- `tictactoe.mcts.MCTSAgent` nhận một callable rollout policy riêng; phần MCTS hiện vẫn là placeholder.
+- `tictactoe.mcts.MCTSAgent` nhận một callable rollout policy riêng (mặc định `random_rollout`).
+
+### MCTSAgent
+
+```python
+import random
+from tictactoe.game import TicTacToeGame
+from tictactoe.mcts import MCTSAgent
+from tictactoe.rollout import heuristic_rollout
+
+game = TicTacToeGame(board_size=3, win_length=3)
+random.seed(7)                       # rollout policy dùng random toàn cục
+agent = MCTSAgent(
+    iterations=1000,                 # số nguyên >= 1
+    uct_c=1.4,                       # >= 0, xấp xỉ √2
+    rollout_policy=heuristic_rollout,
+    final_policy="max_n",            # "max_n" (mặc định) hoặc "max_wn" (chỉ để phân tích)
+    seed=7,                          # RNG riêng cho mở rộng và phá hoà
+    candidate_radius=None,           # None: tự chọn (bàn <= 5: mọi ô; bàn lớn: bán kính 2)
+)
+move = agent.get_move(game)          # (row, col); None nếu ván đã kết thúc; không đổi `game`
+agent.root_stats()                   # [{"move", "W", "N", "WN", "uct"}, ...] sắp theo N giảm dần
+agent.last_stats                     # iterations, tree_size, time_s, c, rollout, final_policy,
+                                     # best_by_n, best_by_wn, max_n_equals_max_wn, warnings
+```
+
+Tham số không hợp lệ ném `ValueError`. `AIController` bắt lỗi này, trả `None` và ghi lý do vào `last_status`. Agent vừa dùng được lưu ở `controller.last_agent` để đọc `root_stats()` / `last_stats`.
 
 Các thuật toán có thể tích hợp:
 
-- `tictactoe.minimax.MinimaxAI`
-- `tictactoe.mcts.MCTSAgent`
+- `tictactoe.minimax.MinimaxAI` (chưa cài đặt)
+- `tictactoe.mcts.MCTSAgent` (đã tích hợp)
 
 ### Ví dụ giao tiếp với GUI
 
@@ -100,7 +126,7 @@ gui = TicTacToeGUI()
 
 ### AI vs AI tournament
 
-Trong GUI, chọn `AI vs AI`, chọn thuật toán riêng cho X và O, nhập số ván rồi nhấn `Start AI Matches`. Kết quả được cộng dồn theo quân X/O và hiển thị số trận thắng, tỷ lệ thắng và hòa trên số ván đã hoàn tất. Người đi trước được chọn qua `First player` và giữ cố định trong loạt. Có thể nhấn `Stop AI Matches` để dừng sớm. Chỉ thuật toán đã triển khai mới hoàn tất được; thuật toán placeholder dừng loạt với thông báo trạng thái.
+Trong GUI, chọn `AI vs AI`, chọn thuật toán riêng cho X và O, nhập số ván rồi nhấn `Start AI Matches`. Kết quả được cộng dồn theo quân X/O và hiển thị số trận thắng, tỷ lệ thắng và hòa trên số ván đã hoàn tất. Người đi trước được chọn qua `First player` và giữ cố định trong loạt. Có thể nhấn `Stop AI Matches` để dừng sớm. Chỉ thuật toán đã triển khai mới hoàn tất được (hiện là Random và MCTS); thuật toán placeholder dừng loạt với thông báo trạng thái.
 
 ## 5. Ví dụ phát triển AI tự do
 

@@ -46,8 +46,9 @@ class RolloutPolicyTests(unittest.TestCase):
         self.assertEqual(controller.algorithm, "mcts")
         self.assertIs(controller.rollout_policy, heuristic_rollout)
 
-        self.assertIsNone(controller.get_move(TicTacToeGame()))
-        self.assertIn("selected rollout policy: heuristic", controller.last_status)
+        # MCTS is integrated: on an empty 15x15 board the only candidate is the centre (MC-AC8.3).
+        self.assertEqual(controller.get_move(TicTacToeGame()), (7, 7))
+        self.assertIn("rollout=heuristic", controller.last_status)
 
 
 if __name__ == "__main__":
