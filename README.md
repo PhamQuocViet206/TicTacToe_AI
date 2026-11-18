@@ -20,10 +20,13 @@ TicTacToe/
 │   ├── gui.py                # Giao diện Tkinter
 │   ├── ai_controller.py      # Adapter giữa GUI và AI
 │   ├── minimax.py            # Placeholder cho Minimax
-│   ├── mcts.py               # Placeholder cho MCTS
+│   ├── mcts.py               # MCTS + UCT
+│   ├── verify_mcts.py        # Script kiểm chứng MCTS (3x3 không thua, bảng W/D/L, W/N tại gốc)
 │   ├── rollout.py            # Các policy chọn nước đi trong rollout
 │   ├── test_game.py          # Unit test base game
-│   └── test_gui.py           # Unit test giao diện
+│   ├── test_gui.py           # Unit test giao diện
+│   ├── test_rollout.py       # Unit test rollout policy
+│   └── test_mcts.py          # Unit test MCTS
 └── requirements.txt          # Không bắt buộc nếu dùng Python chuẩn
 ```
 
@@ -33,7 +36,8 @@ TicTacToe/
 - `game.py`: quản lý trạng thái, nước đi hợp lệ, kiểm tra thắng/hòa, copy trạng thái, API cho AI.
 - `gui.py`: vẽ bàn cờ, xử lý chuột, hiển thị lượt đi, trạng thái thắng/hòa, hỗ trợ chế độ người vs người và người vs AI.
 - `ai_controller.py`: lớp trung gian để GUI không phụ thuộc vào thuật toán cụ thể.
-- `minimax.py`, `mcts.py`: placeholder để tích hợp thuật toán.
+- `minimax.py`: placeholder để tích hợp Minimax.
+- `mcts.py`: MCTS + UCT (`MCTSAgent`), đã tích hợp vào `ai_controller.py`; `verify_mcts.py`: script kiểm chứng và xuất bảng số liệu.
 - `rollout.py`: các chính sách rollout `random` và `heuristic`; đây là chiến lược chọn nước đi trong mô phỏng MCTS, không phải thuật toán AI riêng.
 - `test_game.py` và `test_gui.py`: kiểm thử chức năng cơ bản và GUI.
 
@@ -133,29 +137,74 @@ Các thành viên đang làm Minimax có thể tạo logic trong file `tictactoe
 
 ### 9.2 MCTS
 
-File `tictactoe/mcts.py` là nơi để triển khai MCTS + UCT. Khi chọn MCTS trong GUI, chọn thêm rollout policy `random` hoặc `heuristic`. Hai lựa chọn này chỉ điều khiển cách MCTS chọn nước trong rollout, không phải các thuật toán chơi độc lập. API policy nằm trong `tictactoe/rollout.py` và cung cấp các hàm `random_rollout(game)` và `heuristic_rollout(game)`.
+`tictactoe/mcts.py` cài đặt MCTS + UCT với `UCT(i) = Wᵢ/Nᵢ + c·√(ln N_p / Nᵢ)`, gồm 4 pha Selection – Expansion – Simulation – Backpropagation. Khi chọn MCTS trong GUI, chọn thêm số iteration, hệ số c và rollout policy `random` hoặc `heuristic`. Rollout policy chỉ điều khiển cách MCTS chọn nước trong mô phỏng, không phải thuật toán chơi độc lập. API policy nằm trong `tictactoe/rollout.py`.
+
+Một số điểm chính:
+
+- Phần thưởng: thắng 1, hoà 0.5, thua 0, tính theo góc nhìn người vừa đi nước dẫn vào nút; mỗi tầng đảo thành `1 − r`.
+- Nước cuối được chọn theo **N lớn nhất** (mặc định); `final_policy="max_wn"` chỉ dùng để so sánh trong phần phân tích.
+- Bàn ≤ 5×5 xét mọi ô trống. Bàn lớn hơn chỉ mở rộng các ô trống cách quân đã đặt ≤ 2 ô; bàn rỗng đi ô giữa. Rollout vẫn chạy trên toàn bàn.
+- `agent.root_stats()` trả bảng W, N, W/N, UCT tại gốc; `agent.last_stats` có số iteration, số nút cây, thời gian.
+
+Thời gian một nước đo trên máy phát triển (rollout `random`):
+
+| Bàn | Iteration | Thời gian |
+|---|---|---|
+| 3×3 | 5000 | ~1.2 s |
+| 9×9, k = 5 | 1000 | ~4 s |
+| 15×15, k = 5 | 100 | ~1.5 s |
+| 15×15, k = 5 | 1000 | ~17 s |
+
+GUI gọi AI đồng bộ, nên khi chơi 15×15 nên đặt **100–200 iteration**. Rollout `heuristic` hiện rất chậm trên 15×15 (khoảng 2.6 s mỗi rollout), chỉ nên dùng trên 3×3.
+
+Kiểm chứng và xuất bảng số liệu bằng `tictactoe/verify_mcts.py` (xem docstring đầu file để biết đủ tuỳ chọn):
+
+```powershell
+python -m tictactoe.verify_mcts --iterations 5000 --games 50 --opponent perfect --seed 1   # 3x3 vs đối thủ tối ưu
+python -m tictactoe.verify_mcts --iterations 5000 --games 50 --opponent random             # 3x3 vs ngẫu nhiên
+python -m tictactoe.verify_mcts --threshold 100 200 500 1000 2000 5000 --games 50 --csv mcts_3x3.csv
+python -m tictactoe.verify_mcts --board 15 --k 5 --iterations 100 --games 50 --opponent random
+python -m tictactoe.verify_mcts --root-stats --iterations 1000 --seed 7 --moves "0,0 1,1 0,1"
+python -m tictactoe.verify_mcts --exhaustive --iterations 5000 --seed 1
+```
+
+`--opponent perfect` là bộ giải negamax chính xác cho 3×3 (chọn ngẫu nhiên giữa các nước tối ưu). Khi `MinimaxAI` hoàn thành, dùng `--opponent minimax`.
+
+Kết quả kiểm chứng (c = 1.4, rollout random, seed 1, mỗi dòng 50 ván, đổi lượt đi trước 25/25):
+
+| Bàn | Đối thủ | Iteration | Thắng | Hoà | Thua |
+|---|---|---|---|---|---|
+| 3×3 | perfect | 100 / 200 / 500 / 1000 | 0 | 36 / 41 / 42 / 49 | 14 / 9 / 8 / 1 |
+| 3×3 | perfect | 2000 / 5000 | 0 | 50 | **0** |
+| 3×3 | random | 5000 | 48 | 2 | **0** |
+| 3×3 | self | 5000 | 0 | 50 | 0 |
+| 15×15, k = 5 | random | 100 | 41 | 0 | 9 |
+
+Ngưỡng nhỏ nhất để MCTS không thua ván nào trên 3×3 là **2000 iteration**. Kiểm toàn diện ở 5000 iteration (`--exhaustive`, duyệt mọi phản ứng của đối thủ) cho 0 thua trên cả 100 nhánh khi MCTS đi trước và 461 nhánh khi MCTS đi sau.
 
 ### 9.3 Heuristic Rollout
 
-`heuristic_rollout(game)` ưu tiên nước thắng ngay, sau đó chặn nước thắng ngay của đối thủ, nếu không có thì chọn ngẫu nhiên. MCTS có thể nhận hàm này làm rollout policy. Minimax và MCTS hiện chưa được tích hợp; lựa chọn rollout trong giao diện chưa tự tạo AI chơi độc lập.
+`heuristic_rollout(game)` ưu tiên nước thắng ngay, sau đó chặn nước thắng ngay của đối thủ, nếu không có thì chọn ngẫu nhiên. MCTS nhận hàm này làm rollout policy khi chọn `heuristic` trong GUI. Minimax hiện chưa được tích hợp.
 
 ### 9.4 Chạy nhiều ván AI vs AI
 
-Chọn `AI vs AI`, thiết lập thuật toán riêng cho X và O, nhập số ván, sau đó nhấn `Start AI Matches`. GUI chạy từng nước qua lịch `Tkinter.after()` và cập nhật số ván thắng, tỷ lệ thắng cùng tỷ lệ hòa theo tổng số ván đã hoàn tất. X/O và người đi trước được giữ cố định trong loạt; người đi trước được chọn bằng điều khiển `First player`. `Stop AI Matches` hoặc `New Game` dừng loạt. Nếu chọn thuật toán chưa được tích hợp (Minimax/MCTS), loạt dừng và hiển thị lý do thay vì tính kết quả sai.
+Chọn `AI vs AI`, thiết lập thuật toán riêng cho X và O, nhập số ván, sau đó nhấn `Start AI Matches`. GUI chạy từng nước qua lịch `Tkinter.after()` và cập nhật số ván thắng, tỷ lệ thắng cùng tỷ lệ hòa theo tổng số ván đã hoàn tất. X/O và người đi trước được giữ cố định trong loạt; người đi trước được chọn bằng điều khiển `First player`. `Stop AI Matches` hoặc `New Game` dừng loạt. Nếu chọn thuật toán chưa được tích hợp (hiện là Minimax), hoặc nhập tham số MCTS không hợp lệ (ví dụ c < 0), loạt dừng và hiển thị lý do thay vì tính kết quả sai.
 
 ## 10. Chạy kiểm thử
 
+Từ thư mục gốc của dự án:
+
 ```powershell
-cd d:\Projects\TicTacToe
-python -m unittest tictactoe.test_game tictactoe.test_gui tictactoe.test_rollout
+$env:PYTHONUTF8 = "1"
+python -m unittest discover -s tictactoe -p "test_*.py" -t .
 ```
+
+`PYTHONUTF8=1` tránh lỗi `UnicodeEncodeError` khi GUI in tiếng Việt ra console Windows (cp1252). Các test chạy lâu (kiểm chứng 50 ván 3×3, hiệu năng) chỉ chạy khi đặt thêm `$env:RUN_SLOW = "1"`.
 
 ## 11. Những phần chưa hoàn thiện
 
 - Minimax chưa được tích hợp.
-- MCTS chưa được tích hợp.
-- Heuristic rollout policy đã có thể chọn và dùng độc lập trong mô phỏng, nhưng chưa được gọi bởi MCTS vì MCTS chưa được tích hợp.
-- AI hiện tại chỉ có chế độ random demo để kiểm tra giao diện.
+- MCTS trên 15×15 còn chậm, vì rollout gọi `get_valid_moves()` duyệt toàn bàn ở mỗi bước; `heuristic_rollout` còn chậm hơn nhiều.
 
 ## 12. Kết luận
 

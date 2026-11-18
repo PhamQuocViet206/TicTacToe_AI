@@ -7,9 +7,11 @@ from typing import Optional, Tuple
 
 try:
     from .game import TicTacToeGame
+    from .mcts import MCTSAgent
     from .rollout import ROLLOUT_POLICIES, RolloutPolicy
 except ImportError:  # pragma: no cover
     from game import TicTacToeGame
+    from mcts import MCTSAgent
     from rollout import ROLLOUT_POLICIES, RolloutPolicy
 
 Move = Tuple[int, int]
@@ -36,6 +38,7 @@ class AIController:
         self.rollout_policy_name = rollout_policy.lower()
         self.rollout_policy: Optional[RolloutPolicy] = ROLLOUT_POLICIES.get(self.rollout_policy_name)
         self.last_status = "AI ready"
+        self.last_agent: Optional[MCTSAgent] = None
 
     def get_move(self, game: TicTacToeGame) -> Optional[Move]:
         """Return the move selected by the active AI or None when unavailable."""
@@ -56,12 +59,30 @@ class AIController:
         if self.algorithm == "mcts":
             if self.rollout_policy is None:
                 self.last_status = f"Rollout policy '{self.rollout_policy_name}' is not available."
-            else:
-                self.last_status = (
-                    f"MCTS AI is not integrated yet "
-                    f"(selected rollout policy: {self.rollout_policy_name})."
+                return None
+            try:
+                agent = MCTSAgent(
+                    iterations=self.iterations,
+                    uct_c=self.uct_c,
+                    rollout_policy=self.rollout_policy,
                 )
-            return None
+            except ValueError as exc:
+                self.last_status = f"Invalid MCTS settings: {exc}"
+                return None
+            self.last_agent = agent
+            move = agent.get_move(game)
+            self.last_status = self._mcts_status(agent, move)
+            return move
 
         self.last_status = f"AI algorithm '{self.algorithm}' is not available."
         return None
+
+    def _mcts_status(self, agent: MCTSAgent, move: Optional[Move]) -> str:
+        stats = agent.last_stats
+        summary = (
+            f"MCTS(c={agent.uct_c}, it={self.iterations}, rollout={self.rollout_policy_name}) chose {move}"
+        )
+        chosen = next((row for row in agent.root_stats() if row["move"] == move), None)
+        if chosen is not None:
+            summary += f": N={chosen['N']}, W/N={chosen['WN']:.3f}"
+        return f"{summary}, time={stats.get('time_s', 0.0):.2f}s."
