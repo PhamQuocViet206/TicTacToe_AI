@@ -163,7 +163,7 @@ def run_iteration_matchup(
     heur_move_times: List[float] = []
     rand_move_times: List[float] = []
     game_times: List[float] = []
-    game_Reference_moves: List[int] = []
+    game_moves: List[int] = []
 
     for i in range(games):
         pair_seed = seed + (i // 2)
@@ -204,7 +204,7 @@ def run_iteration_matchup(
         heur_move_times.extend(match["move_times"][heur_player])
         rand_move_times.extend(match["move_times"][rand_player])
         game_times.append(match["game_time_s"])
-        game_Reference_moves.append(match["moves_count"])
+        game_moves.append(match["moves_count"])
 
     avg_h_move = sum(heur_move_times) / len(heur_move_times) if heur_move_times else 0.0
     avg_r_move = sum(rand_move_times) / len(rand_move_times) if rand_move_times else 0.0
@@ -228,7 +228,7 @@ def run_iteration_matchup(
         "rand_avg_move_s": round(avg_r_move, 4),
         "time_ratio": round(avg_h_move / avg_r_move, 2) if avg_r_move > 0 else 0.0,
         "avg_game_s": round(sum(game_times) / len(game_times), 3),
-        "avg_moves": round(sum(game_Reference_moves) / len(game_Reference_moves), 1),
+        "avg_moves": round(sum(game_moves) / len(game_moves), 1),
         "heur_as_X": first_stats,
         "heur_as_O": second_stats,
     }
@@ -359,11 +359,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     results: List[Dict[str, object]] = []
 
-    print("=== 1. EQUAL ITERATIONS BENCHMARK (10x10 & 15x15, k=5; 3x3, k=3) ===")
+    print("=== 1. EQUAL ITERATIONS BENCHMARK (3x3 k=3; 5x5, 10x10 & 15x15 k=5) ===")
     for b, k, it, g in [
         (3, 3, 50, args.games),
         (3, 3, 100, args.games),
         (3, 3, 200, args.games),
+        (5, 5, 50, args.games),
+        (5, 5, 100, args.games),
         (10, 5, 30, args.games),
         (10, 5, 50, args.games),
         (10, 5, 100, args.games),
@@ -380,8 +382,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         results.append(row)
         print(format_table([row]).splitlines()[-1], flush=True)
 
-    print("\n=== 3. EQUAL TIME BUDGET BENCHMARK (Same Per-Move Time Budget, 10x10 & 15x15 k=5) ===")
+    print("\n=== 3. EQUAL TIME BUDGET BENCHMARK (Same Per-Move Time Budget, 5x5, 10x10 & 15x15 k=5) ===")
     for b, k, budget, g in [
+        (5, 5, 0.03, args.games),
         (10, 5, 0.05, args.games),
         (10, 5, 0.10, args.games),
         (15, 5, 0.10, max(10, args.games // 2)),

@@ -224,13 +224,13 @@ def _evaluate_move(game: TicTacToeGame, move: Move, player: int) -> int:
             atk_count, atk_open = _analyze_direction(game, row, col, dr, dc, player)
             total_score += _score_direction(atk_count, atk_open, win_length, is_attack=True)
         elif v1 == EMPTY and v2 == EMPTY:
-            total_score += 2
+            total_score += ATTACK_WEIGHTS[(1, 2)]
 
         if v1 == opponent or v2 == opponent:
             def_count, def_open = _analyze_direction(game, row, col, dr, dc, opponent)
             total_score += _score_direction(def_count, def_open, win_length, is_attack=False)
         elif v1 == EMPTY and v2 == EMPTY:
-            total_score += 1
+            total_score += DEFENSE_WEIGHTS[(1, 2)]
 
     center = size // 2
     distance = max(abs(row - center), abs(col - center))
