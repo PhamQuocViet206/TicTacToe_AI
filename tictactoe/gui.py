@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import time
+import threading
+import queue
 import tkinter as tk
 from tkinter import ttk
 
@@ -67,6 +69,11 @@ class TicTacToeGUI:
         self.batch_o_wins = 0
         self.batch_draws = 0
         self._scheduled_callback = None
+        self._ai_request_id = 0
+        self._ai_worker: threading.Thread | None = None
+        self._ai_result_queue: queue.Queue = queue.Queue()
+        self._ai_poll_running = True
+        self._ai_poll_callback = None
         self.hover_cell: tuple[int, int] | None = None
 
         # Expansion state flags
@@ -83,18 +90,27 @@ class TicTacToeGUI:
         # Mode & Player State Variables
         self.mode_var = tk.StringVar(value="Human vs Human")
         self.first_player_var = tk.StringVar(value="X")
+        self.board_size_var = tk.StringVar(value=str(BOARD_SIZE))
 
         # AI Algorithm & Advanced Parameters for X (and default AI in Human vs AI)
         self.ai_var = tk.StringVar(value="random")
         self.ai_iterations_var = tk.StringVar(value="1000")
         self.uct_var = tk.StringVar(value="1.40")
         self.rollout_var = tk.StringVar(value="random")
+        self.minimax_depth_var = tk.StringVar(value="Auto")
+        self.minimax_max_nodes_var = tk.StringVar(value="30000")
+        self.minimax_time_limit_var = tk.StringVar(value="2.0")
+        self.minimax_alpha_beta_var = tk.BooleanVar(value=True)
 
         # Separate AI Algorithm & Advanced Parameters for O (in AI vs AI mode)
         self.ai_o_var = tk.StringVar(value="random")
         self.ai_o_iterations_var = tk.StringVar(value="1000")
         self.uct_o_var = tk.StringVar(value="1.40")
         self.rollout_o_var = tk.StringVar(value="random")
+        self.minimax_o_depth_var = tk.StringVar(value="Auto")
+        self.minimax_o_max_nodes_var = tk.StringVar(value="30000")
+        self.minimax_o_time_limit_var = tk.StringVar(value="2.0")
+        self.minimax_o_alpha_beta_var = tk.BooleanVar(value=True)
 
         # Batch Simulation & Status Variables
         self.batch_games_var = tk.StringVar(value="10")
@@ -106,6 +122,8 @@ class TicTacToeGUI:
         self._configure_styles()
         self._build_ui()
         self._reset_game()
+        self.root.bind("<Destroy>", self._on_root_destroy)
+        self._poll_ai_results()
 
     def _configure_styles(self) -> None:
         """Configure ttk widget styles for modern minimalism."""
@@ -177,9 +195,43 @@ class TicTacToeGUI:
         self.canvas.bind("<Motion>", self._on_canvas_motion)
         self.canvas.bind("<Leave>", self._on_canvas_leave)
 
-        # ----------------- Right: Control & Info Sidebar -----------------
-        sidebar = tk.Frame(main_container, bg=COLOR_BG, padx=14, pady=0)
-        sidebar.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+        # ----------------- Right: Scrollable Control & Info Sidebar -----------------
+        sidebar_outer = tk.Frame(main_container, bg=COLOR_BG)
+        sidebar_outer.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(14, 0))
+
+        self.sidebar_canvas = tk.Canvas(
+            sidebar_outer,
+            bg=COLOR_BG,
+            highlightthickness=0,
+            bd=0,
+            width=340,
+        )
+        self.sidebar_scrollbar = ttk.Scrollbar(
+            sidebar_outer,
+            orient="vertical",
+            command=self.sidebar_canvas.yview,
+        )
+        self.sidebar_canvas.configure(yscrollcommand=self.sidebar_scrollbar.set)
+
+        self.sidebar_scrollbar.pack(side=tk.RIGHT, fill=tk.Y, padx=(6, 0))
+        self.sidebar_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        sidebar = tk.Frame(self.sidebar_canvas, bg=COLOR_BG, padx=0, pady=0)
+        self._sidebar_window_id = self.sidebar_canvas.create_window(
+            (0, 0),
+            window=sidebar,
+            anchor="nw",
+        )
+
+        def _on_sidebar_configure(_event=None) -> None:
+            self.sidebar_canvas.configure(scrollregion=self.sidebar_canvas.bbox("all"))
+
+        def _on_sidebar_canvas_configure(event) -> None:
+            self.sidebar_canvas.itemconfigure(self._sidebar_window_id, width=event.width)
+
+        sidebar.bind("<Configure>", _on_sidebar_configure)
+        self.sidebar_canvas.bind("<Configure>", _on_sidebar_canvas_configure)
+        self.root.bind_all("<MouseWheel>", self._on_sidebar_mousewheel)
 
         # 1. Header & Title Card
         title_frame = tk.Frame(sidebar, bg=COLOR_BG)
@@ -194,9 +246,10 @@ class TicTacToeGUI:
         )
         title_lbl.pack(side=tk.LEFT)
 
+        self.board_title_var = tk.StringVar(value=f"{BOARD_SIZE} × {BOARD_SIZE} • Luật 5 quân")
         sub_lbl = tk.Label(
             title_frame,
-            text="15 × 15 • Luật 5 quân",
+            textvariable=self.board_title_var,
             font=(FONT_FAMILY, 9),
             fg=COLOR_TEXT_MUTED,
             bg=COLOR_BG,
@@ -486,6 +539,41 @@ class TicTacToeGUI:
 
         mode = self.mode_var.get()
 
+        tk.Label(
+            self.dynamic_frame,
+            text="Kích thước bàn",
+            font=(FONT_FAMILY, 9, "bold"),
+            fg=COLOR_TEXT_MUTED,
+            bg=COLOR_PANEL_BG,
+        ).pack(anchor="w", pady=(0, 2))
+        board_row = tk.Frame(self.dynamic_frame, bg=COLOR_PANEL_BG)
+        board_row.pack(fill=tk.X, pady=(0, 6))
+        for board_size in (5, 10, 15):
+            button = tk.Button(
+                board_row,
+                text=f"{board_size} × {board_size}",
+                font=(FONT_FAMILY, 9, "bold"),
+                fg=(
+                    "#ffffff"
+                    if self.board_size_var.get() == str(board_size)
+                    else COLOR_TEXT_MAIN
+                ),
+                bg=(
+                    "#2563eb"
+                    if self.board_size_var.get() == str(board_size)
+                    else "#ffffff"
+                ),
+                activebackground="#1d4ed8",
+                activeforeground="#ffffff",
+                relief=tk.FLAT,
+                bd=1,
+                padx=6,
+                pady=5,
+                cursor="hand2",
+                command=lambda size=board_size: self._select_board_size(size),
+            )
+            button.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
+
         if mode == "Human vs Human":
             # Only First Player matters
             tk.Label(
@@ -546,26 +634,29 @@ class TicTacToeGUI:
             )
             first_combo.pack(fill=tk.X)
 
-            # Single Advanced MCTS Toggle for AI
-            adv_toggle_btn = tk.Button(
-                self.dynamic_frame,
-                text="⚙ Cài đặt AI nâng cao  ▾" if not self.advanced_expanded else "⚙ Cài đặt AI nâng cao  ▴",
-                font=(FONT_FAMILY, 9),
-                fg="#2563eb",
-                bg=COLOR_PANEL_BG,
-                activebackground=COLOR_PANEL_BG,
-                activeforeground="#1d4ed8",
-                bd=0,
-                cursor="hand2",
-                anchor="w",
-                command=self._toggle_advanced_settings,
-            )
-            adv_toggle_btn.pack(fill=tk.X, pady=(4, 2))
+            algo = self.ai_var.get()
+            if algo in ("minimax", "mcts"):
+                algo_label = "Minimax" if algo == "minimax" else "MCTS"
+                arrow = "▴" if self.advanced_expanded else "▾"
+                adv_toggle_btn = tk.Button(
+                    self.dynamic_frame,
+                    text=f"⚙ Cài đặt {algo_label} nâng cao  {arrow}",
+                    font=(FONT_FAMILY, 9),
+                    fg="#2563eb",
+                    bg=COLOR_PANEL_BG,
+                    activebackground=COLOR_PANEL_BG,
+                    activeforeground="#1d4ed8",
+                    bd=0,
+                    cursor="hand2",
+                    anchor="w",
+                    command=self._toggle_advanced_settings,
+                )
+                adv_toggle_btn.pack(fill=tk.X, pady=(4, 2))
 
-            if self.advanced_expanded:
-                adv_frame = tk.Frame(self.dynamic_frame, bg="#f8fafc", padx=8, pady=8)
-                adv_frame.pack(fill=tk.X, pady=(2, 6))
-                self._render_mcts_inputs(adv_frame, self.ai_iterations_var, self.uct_var, self.rollout_var)
+                if self.advanced_expanded:
+                    adv_frame = tk.Frame(self.dynamic_frame, bg="#f8fafc", padx=8, pady=8)
+                    adv_frame.pack(fill=tk.X, pady=(2, 6))
+                    self._render_algorithm_advanced_inputs(adv_frame, algo, is_o=False, bg_color="#f8fafc")
 
             self.stats_card.pack_forget()
 
@@ -609,51 +700,80 @@ class TicTacToeGUI:
             ).pack(fill=tk.X)
 
             # Row 2: Two SEPARATE Advanced AI Setting toggles for X and O
+            algo_x = self.ai_var.get()
+            algo_o = self.ai_o_var.get()
+
             adv_btn_row = tk.Frame(self.dynamic_frame, bg=COLOR_PANEL_BG)
             adv_btn_row.pack(fill=tk.X, pady=(2, 4))
 
-            toggle_x_txt = "⚙ Nâng cao X  ▴" if self.advanced_x_expanded else "⚙ Nâng cao X  ▾"
-            btn_adv_x = tk.Button(
-                adv_btn_row,
-                text=toggle_x_txt,
-                font=(FONT_FAMILY, 8, "bold"),
-                fg=COLOR_X,
-                bg=COLOR_PANEL_BG,
-                activebackground=COLOR_PANEL_BG,
-                activeforeground=COLOR_X,
-                bd=0,
-                cursor="hand2",
-                command=self._toggle_advanced_x,
-            )
+            if algo_x in ("minimax", "mcts"):
+                x_label = "Minimax" if algo_x == "minimax" else "MCTS"
+                toggle_x_txt = f"⚙ {x_label} X  {'▴' if self.advanced_x_expanded else '▾'}"
+                btn_adv_x = tk.Button(
+                    adv_btn_row,
+                    text=toggle_x_txt,
+                    font=(FONT_FAMILY, 8, "bold"),
+                    fg=COLOR_X,
+                    bg=COLOR_PANEL_BG,
+                    activebackground=COLOR_PANEL_BG,
+                    activeforeground=COLOR_X,
+                    bd=0,
+                    cursor="hand2",
+                    command=self._toggle_advanced_x,
+                )
+            else:
+                btn_adv_x = tk.Button(
+                    adv_btn_row,
+                    text="— Nâng cao X —",
+                    font=(FONT_FAMILY, 8),
+                    fg=COLOR_TEXT_MUTED,
+                    bg=COLOR_PANEL_BG,
+                    bd=0,
+                    state=tk.DISABLED,
+                )
             btn_adv_x.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
 
-            toggle_o_txt = "⚙ Nâng cao O  ▴" if self.advanced_o_expanded else "⚙ Nâng cao O  ▾"
-            btn_adv_o = tk.Button(
-                adv_btn_row,
-                text=toggle_o_txt,
-                font=(FONT_FAMILY, 8, "bold"),
-                fg=COLOR_O,
-                bg=COLOR_PANEL_BG,
-                activebackground=COLOR_PANEL_BG,
-                activeforeground=COLOR_O,
-                bd=0,
-                cursor="hand2",
-                command=self._toggle_advanced_o,
-            )
+            if algo_o in ("minimax", "mcts"):
+                o_label = "Minimax" if algo_o == "minimax" else "MCTS"
+                toggle_o_txt = f"⚙ {o_label} O  {'▴' if self.advanced_o_expanded else '▾'}"
+                btn_adv_o = tk.Button(
+                    adv_btn_row,
+                    text=toggle_o_txt,
+                    font=(FONT_FAMILY, 8, "bold"),
+                    fg=COLOR_O,
+                    bg=COLOR_PANEL_BG,
+                    activebackground=COLOR_PANEL_BG,
+                    activeforeground=COLOR_O,
+                    bd=0,
+                    cursor="hand2",
+                    command=self._toggle_advanced_o,
+                )
+            else:
+                btn_adv_o = tk.Button(
+                    adv_btn_row,
+                    text="— Nâng cao O —",
+                    font=(FONT_FAMILY, 8),
+                    fg=COLOR_TEXT_MUTED,
+                    bg=COLOR_PANEL_BG,
+                    bd=0,
+                    state=tk.DISABLED,
+                )
             btn_adv_o.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(4, 0))
 
             # Row 3: Separate Advanced Panels for X and/or O
-            if self.advanced_x_expanded:
+            if self.advanced_x_expanded and algo_x in ("minimax", "mcts"):
+                x_title = "Minimax" if algo_x == "minimax" else "MCTS"
                 panel_x = tk.Frame(self.dynamic_frame, bg="#fff1f2", padx=8, pady=6, highlightbackground="#fecdd3", highlightthickness=1)
                 panel_x.pack(fill=tk.X, pady=(2, 4))
-                tk.Label(panel_x, text="⚙ Cài đặt nâng cao AI (Quân X):", font=(FONT_FAMILY, 8, "bold"), fg=COLOR_X, bg="#fff1f2").pack(anchor="w", pady=(0, 2))
-                self._render_mcts_inputs(panel_x, self.ai_iterations_var, self.uct_var, self.rollout_var, bg_color="#fff1f2")
+                tk.Label(panel_x, text=f"⚙ Cài đặt {x_title} (Quân X):", font=(FONT_FAMILY, 8, "bold"), fg=COLOR_X, bg="#fff1f2").pack(anchor="w", pady=(0, 2))
+                self._render_algorithm_advanced_inputs(panel_x, algo_x, is_o=False, bg_color="#fff1f2")
 
-            if self.advanced_o_expanded:
+            if self.advanced_o_expanded and algo_o in ("minimax", "mcts"):
+                o_title = "Minimax" if algo_o == "minimax" else "MCTS"
                 panel_o = tk.Frame(self.dynamic_frame, bg="#f0f9ff", padx=8, pady=6, highlightbackground="#bae6fd", highlightthickness=1)
                 panel_o.pack(fill=tk.X, pady=(2, 4))
-                tk.Label(panel_o, text="⚙ Cài đặt nâng cao AI (Quân O):", font=(FONT_FAMILY, 8, "bold"), fg=COLOR_O, bg="#f0f9ff").pack(anchor="w", pady=(0, 2))
-                self._render_mcts_inputs(panel_o, self.ai_o_iterations_var, self.uct_o_var, self.rollout_o_var, bg_color="#f0f9ff")
+                tk.Label(panel_o, text=f"⚙ Cài đặt {o_title} (Quân O):", font=(FONT_FAMILY, 8, "bold"), fg=COLOR_O, bg="#f0f9ff").pack(anchor="w", pady=(0, 2))
+                self._render_algorithm_advanced_inputs(panel_o, algo_o, is_o=True, bg_color="#f0f9ff")
 
             # Row 4: Match Count & Action Buttons
             batch_row = tk.Frame(self.dynamic_frame, bg=COLOR_PANEL_BG)
@@ -746,6 +866,100 @@ class TicTacToeGUI:
             style="Clean.TCombobox",
         ).pack(side=tk.RIGHT)
 
+    def _render_minimax_inputs(
+        self,
+        parent: tk.Widget,
+        depth_var: tk.StringVar,
+        max_nodes_var: tk.StringVar,
+        time_limit_var: tk.StringVar,
+        alpha_beta_var: tk.BooleanVar,
+        bg_color: str = "#f8fafc",
+    ) -> None:
+        """Render Minimax hyperparameter inputs inside a specified container."""
+        r1 = tk.Frame(parent, bg=bg_color)
+        r1.pack(fill=tk.X, pady=2)
+        tk.Label(r1, text="Độ sâu tìm kiếm (Depth):", font=(FONT_FAMILY, 8), bg=bg_color, fg=COLOR_TEXT_MUTED).pack(side=tk.LEFT)
+        ttk.Combobox(
+            r1,
+            textvariable=depth_var,
+            values=["Auto", "1", "2", "3", "4", "5", "6", "7", "8"],
+            state="readonly",
+            width=12,
+            style="Clean.TCombobox",
+        ).pack(side=tk.RIGHT)
+
+        r2 = tk.Frame(parent, bg=bg_color)
+        r2.pack(fill=tk.X, pady=2)
+        tk.Label(r2, text="Số node tối đa:", font=(FONT_FAMILY, 8), bg=bg_color, fg=COLOR_TEXT_MUTED).pack(side=tk.LEFT)
+        ttk.Combobox(
+            r2,
+            textvariable=max_nodes_var,
+            values=["5000", "10000", "30000", "50000", "100000", "Không giới hạn"],
+            state="readonly",
+            width=12,
+            style="Clean.TCombobox",
+        ).pack(side=tk.RIGHT)
+
+        r3 = tk.Frame(parent, bg=bg_color)
+        r3.pack(fill=tk.X, pady=2)
+        tk.Label(r3, text="Giới hạn thời gian (giây):", font=(FONT_FAMILY, 8), bg=bg_color, fg=COLOR_TEXT_MUTED).pack(side=tk.LEFT)
+        ttk.Combobox(
+            r3,
+            textvariable=time_limit_var,
+            values=["0.5", "1.0", "2.0", "5.0", "10.0", "Không giới hạn"],
+            state="readonly",
+            width=12,
+            style="Clean.TCombobox",
+        ).pack(side=tk.RIGHT)
+
+        r4 = tk.Frame(parent, bg=bg_color)
+        r4.pack(fill=tk.X, pady=(4, 2))
+        tk.Label(r4, text="Cắt tỉa Alpha-Beta:", font=(FONT_FAMILY, 8), bg=bg_color, fg=COLOR_TEXT_MUTED).pack(side=tk.LEFT)
+        tk.Checkbutton(
+            r4,
+            text="Bật",
+            variable=alpha_beta_var,
+            font=(FONT_FAMILY, 8, "bold"),
+            fg=COLOR_TEXT_MAIN,
+            bg=bg_color,
+            activebackground=bg_color,
+            selectcolor="#ffffff",
+            cursor="hand2",
+        ).pack(side=tk.RIGHT)
+
+    def _render_algorithm_advanced_inputs(
+        self,
+        parent: tk.Widget,
+        algorithm: str,
+        is_o: bool = False,
+        bg_color: str = "#f8fafc",
+    ) -> None:
+        """Render the advanced settings panel matching the selected AI algorithm."""
+        if algorithm == "mcts":
+            if is_o:
+                self._render_mcts_inputs(parent, self.ai_o_iterations_var, self.uct_o_var, self.rollout_o_var, bg_color=bg_color)
+            else:
+                self._render_mcts_inputs(parent, self.ai_iterations_var, self.uct_var, self.rollout_var, bg_color=bg_color)
+        elif algorithm == "minimax":
+            if is_o:
+                self._render_minimax_inputs(
+                    parent,
+                    self.minimax_o_depth_var,
+                    self.minimax_o_max_nodes_var,
+                    self.minimax_o_time_limit_var,
+                    self.minimax_o_alpha_beta_var,
+                    bg_color=bg_color,
+                )
+            else:
+                self._render_minimax_inputs(
+                    parent,
+                    self.minimax_depth_var,
+                    self.minimax_max_nodes_var,
+                    self.minimax_time_limit_var,
+                    self.minimax_alpha_beta_var,
+                    bg_color=bg_color,
+                )
+
     def _toggle_advanced_x(self) -> None:
         """Toggle advanced settings frame specifically for AI X."""
         self.advanced_x_expanded = not self.advanced_x_expanded
@@ -766,6 +980,7 @@ class TicTacToeGUI:
 
     def _update_ai_settings(self) -> None:
         """Refresh AI assignments and dynamic UI controls after any mode change."""
+        self._invalidate_ai_request()
         self._refresh_dynamic_controls()
         if self.batch_active:
             self._stop_ai_matches()
@@ -785,13 +1000,50 @@ class TicTacToeGUI:
         return PLAYER_X
 
     def _reset_game(self) -> None:
+        self._invalidate_ai_request()
         self._stop_ai_matches()
         self._cancel_scheduled_callback()
         self._new_game_state()
         self._update_status_message()
 
+    def _set_board_size(self) -> None:
+        """Apply a board size between 5x5 and 15x15 and start a fresh game."""
+        try:
+            board_size = int(self.board_size_var.get())
+        except (TypeError, ValueError):
+            self.board_size_var.set(str(BOARD_SIZE))
+            return
+        if board_size not in (5, 10, 15):
+            self.board_size_var.set(str(BOARD_SIZE))
+            return
+        if self.game.board_size == board_size:
+            return
+        self._reset_game()
+
+    def _select_board_size(self, board_size: int) -> None:
+        """Select one of the direct board-size buttons."""
+        if board_size not in (5, 10, 15):
+            return
+        self.board_size_var.set(str(board_size))
+        self._set_board_size()
+        self._refresh_dynamic_controls()
+
     def _new_game_state(self) -> None:
-        self.game = TicTacToeGame(board_size=BOARD_SIZE)
+        try:
+            board_size = int(self.board_size_var.get())
+        except (TypeError, ValueError):
+            board_size = BOARD_SIZE
+            self.board_size_var.set(str(board_size))
+        board_size = max(5, min(15, board_size))
+
+        self.game = TicTacToeGame(board_size=board_size)
+        self._invalidate_ai_request()
+        self.cell_size = max(36, 540 // board_size)
+        self.root.title(f"TicTacToe AI - Cờ Caro {board_size}x{board_size}")
+        if hasattr(self, "canvas"):
+            canvas_dim = self.margin * 2 + self.cell_size * board_size
+            self.canvas.configure(width=canvas_dim, height=canvas_dim)
+        self.board_title_var.set(f"{board_size} × {board_size} • Luật 5 quân")
         self.game.current_player = PLAYER_X if self.first_player_var.get() == "X" else PLAYER_O
         self.history = [self.game.copy()]
         self.ai_busy = False
@@ -808,6 +1060,7 @@ class TicTacToeGUI:
         self._reset_game()
 
     def undo_move(self) -> None:
+        self._invalidate_ai_request()
         if self.batch_active:
             self._stop_ai_matches()
             self._cancel_scheduled_callback()
@@ -976,23 +1229,140 @@ class TicTacToeGUI:
             self.ai_busy = False
             self._update_status_message()
             return
+        if self._ai_worker is not None and self._ai_worker.is_alive():
+            return
 
         controller = self._controller_for_current_player()
-        player_moving = self.game.current_player
+        snapshot = self.game.copy()
+        player_moving = snapshot.current_player
         player_str = "X" if player_moving == PLAYER_X else "O"
+        self._ai_request_id += 1
+        request_id = self._ai_request_id
+        batch_active = self.batch_active
 
-        # Calculate time taken for this AI move
-        start_time = time.perf_counter()
-        move = controller.get_move(self.game)
-        move_duration = time.perf_counter() - start_time
+        def worker() -> None:
+            start_time = time.perf_counter()
+            try:
+                move = controller.get_move(snapshot)
+                error = None
+            except Exception as exc:
+                move = None
+                error = f"{type(exc).__name__}: {exc}"
+            move_duration = time.perf_counter() - start_time
+            self._ai_result_queue.put((
+                request_id,
+                snapshot,
+                player_moving,
+                player_str,
+                controller,
+                move,
+                move_duration,
+                batch_active,
+                error,
+            ))
 
+        self._ai_worker = threading.Thread(
+            target=worker,
+            name="TicTacToeAI",
+            daemon=True,
+        )
+        self._ai_worker.start()
+
+    def _invalidate_ai_request(self) -> None:
+        self._ai_request_id += 1
+
+    def _on_sidebar_mousewheel(self, event) -> None:
+        """Scroll the sidebar vertically when the pointer is over it and content overflows."""
+        try:
+            if not self.sidebar_canvas.winfo_exists():
+                return
+            bbox = self.sidebar_canvas.bbox("all")
+            if not bbox:
+                return
+            content_height = bbox[3] - bbox[1]
+            canvas_height = self.sidebar_canvas.winfo_height()
+            if content_height <= canvas_height:
+                return
+
+            canvas_left = self.sidebar_canvas.winfo_rootx()
+            canvas_right = canvas_left + self.sidebar_canvas.winfo_width()
+            canvas_top = self.sidebar_canvas.winfo_rooty()
+            canvas_bottom = canvas_top + canvas_height
+            if not (canvas_left <= event.x_root <= canvas_right and canvas_top <= event.y_root <= canvas_bottom):
+                return
+
+            delta = -1 * int(event.delta / 120) if event.delta else 0
+            if delta != 0:
+                self.sidebar_canvas.yview_scroll(delta, "units")
+        except tk.TclError:
+            pass
+
+    def _on_root_destroy(self, event) -> None:
+        if event.widget is self.root:
+            self._ai_poll_running = False
+            if self._ai_poll_callback is not None:
+                try:
+                    self.root.after_cancel(self._ai_poll_callback)
+                except tk.TclError:
+                    pass
+                self._ai_poll_callback = None
+            self._invalidate_ai_request()
+
+    def _poll_ai_results(self) -> None:
+        """Process worker results only on the Tk main thread."""
+        if not self._ai_poll_running:
+            return
+        try:
+            while True:
+                result = self._ai_result_queue.get_nowait()
+                self._complete_ai_turn(*result)
+        except queue.Empty:
+            pass
+        if self._ai_poll_running:
+            try:
+                self._ai_poll_callback = self.root.after(
+                    10, self._poll_ai_results
+                )
+            except tk.TclError:
+                self._ai_poll_running = False
+
+    def _complete_ai_turn(
+        self,
+        request_id: int,
+        snapshot: TicTacToeGame,
+        player_moving: int,
+        player_str: str,
+        controller: AIController,
+        move,
+        move_duration: float,
+        batch_active: bool,
+        error: str | None,
+    ) -> None:
+        if request_id != self._ai_request_id:
+            return
+        if self.game.current_player != player_moving:
+            self.ai_busy = False
+            return
+        if snapshot.board != self.game.board or snapshot.moves_count != self.game.moves_count:
+            self.ai_busy = False
+            return
+        if batch_active != self.batch_active:
+            self.ai_busy = False
+            return
+
+        self._ai_worker = None
+        if error is not None:
+            self.ai_busy = False
+            self.status_var.set(f"AI error: {error}")
+            if self.batch_active:
+                self._stop_ai_matches()
+            return
         if move is None:
             self.ai_busy = False
             self.status_var.set(controller.last_status)
             if self.batch_active:
                 self._stop_ai_matches()
             return
-
         if not self.game.is_valid_move(move):
             self.ai_busy = False
             self.status_var.set("AI returned an invalid move.")
@@ -1000,7 +1370,6 @@ class TicTacToeGUI:
                 self._stop_ai_matches()
             return
 
-        # Record move duration
         if player_moving == PLAYER_X:
             self.ai_x_move_times.append(move_duration)
         else:
@@ -1010,49 +1379,80 @@ class TicTacToeGUI:
 
         avg_x, avg_o = self.get_average_move_times()
         cur_avg = avg_x if player_moving == PLAYER_X else avg_o
-
-        # Print calculated duration & average to terminal
         print(
-            f"[AI Move] Quân {player_str} | Nước đi {move} | "
-            f"Thời gian: {move_duration:.4f}s | Thời gian TB {player_str}: {cur_avg:.4f}s"
+            f"[AI Move] X/O={player_str} move={move} "
+            f"time={move_duration:.4f}s avg={cur_avg:.4f}s"
         )
 
         self.ai_busy = False
         self._apply_move(move)
-
-        # Update real-time timing display on screen
         self._update_batch_stats()
+
+    @staticmethod
+    def _parse_int_or_default(raw_value: str, default: int | None) -> int | None:
+        try:
+            return int(str(raw_value).strip())
+        except (ValueError, TypeError):
+            return default
+
+    @staticmethod
+    def _parse_float_or_default(raw_value: str, default: float) -> float:
+        try:
+            return float(str(raw_value).strip())
+        except (ValueError, TypeError):
+            return default
 
     def _controller_for_current_player(self) -> AIController:
         """Create AIController respecting separate advanced parameters for X and O in AI vs AI mode."""
-        if self.mode_var.get() == "AI vs AI" and self.game.current_player == PLAYER_O:
+        use_o_settings = self.mode_var.get() == "AI vs AI" and self.game.current_player == PLAYER_O
+        if use_o_settings:
             algorithm = self.ai_o_var.get()
-            try:
-                iterations = int(self.ai_o_iterations_var.get())
-            except (ValueError, TypeError):
-                iterations = 1000
-            try:
-                uct_c = float(self.uct_o_var.get())
-            except (ValueError, TypeError):
-                uct_c = 1.4
-            rollout_policy = self.rollout_o_var.get()
+            iter_var = self.ai_o_iterations_var
+            uct_var = self.uct_o_var
+            rollout_var = self.rollout_o_var
+            depth_var = self.minimax_o_depth_var
+            max_nodes_var = self.minimax_o_max_nodes_var
+            time_limit_var = self.minimax_o_time_limit_var
+            alpha_beta_var = self.minimax_o_alpha_beta_var
         else:
             algorithm = self.ai_var.get()
-            try:
-                iterations = int(self.ai_iterations_var.get())
-            except (ValueError, TypeError):
-                iterations = 1000
-            try:
-                uct_c = float(self.uct_var.get())
-            except (ValueError, TypeError):
-                uct_c = 1.4
-            rollout_policy = self.rollout_var.get()
+            iter_var = self.ai_iterations_var
+            uct_var = self.uct_var
+            rollout_var = self.rollout_var
+            depth_var = self.minimax_depth_var
+            max_nodes_var = self.minimax_max_nodes_var
+            time_limit_var = self.minimax_time_limit_var
+            alpha_beta_var = self.minimax_alpha_beta_var
+
+        iterations = self._parse_int_or_default(iter_var.get(), 1000) or 1000
+        uct_c = self._parse_float_or_default(uct_var.get(), 1.4)
+        rollout_policy = rollout_var.get()
+
+        raw_depth = str(depth_var.get()).strip()
+        depth = None if raw_depth.lower() == "auto" else self._parse_int_or_default(raw_depth, None)
+
+        raw_max_nodes = str(max_nodes_var.get()).strip()
+        if raw_max_nodes.lower() in ("unlimited", "không giới hạn"):
+            max_nodes = None
+        else:
+            max_nodes = self._parse_int_or_default(raw_max_nodes.replace(".", ""), 30000)
+
+        raw_time_limit = str(time_limit_var.get()).strip()
+        if raw_time_limit.lower() in ("unlimited", "không giới hạn"):
+            time_limit = None
+        else:
+            time_limit = self._parse_float_or_default(raw_time_limit, 2.0)
+        alpha_beta = bool(alpha_beta_var.get())
 
         return AIController(
             algorithm=algorithm,
             iterations=iterations,
             uct_c=uct_c,
             rollout_policy=rollout_policy,
+            depth=depth,
+            max_nodes=max_nodes,
+            time_limit=time_limit,
+            alpha_beta=alpha_beta,
         )
 
     def start_ai_matches(self) -> None:
@@ -1150,6 +1550,7 @@ class TicTacToeGUI:
         self.badge_time_o.configure(text=f"⏱ TB O: {str_o}")
 
     def _stop_ai_matches(self) -> None:
+        self._invalidate_ai_request()
         self.batch_active = False
         self.ai_busy = False
 

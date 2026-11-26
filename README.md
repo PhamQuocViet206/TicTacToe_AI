@@ -19,7 +19,7 @@ TicTacToe/
 │   ├── game.py               # Logic luật chơi TicTacToe
 │   ├── gui.py                # Giao diện Tkinter
 │   ├── ai_controller.py      # Adapter giữa GUI và AI
-│   ├── minimax.py            # Placeholder cho Minimax
+│   ├── minimax.py            # Minimax + alpha-beta
 │   ├── mcts.py               # MCTS + UCT
 │   ├── verify_mcts.py        # Script kiểm chứng MCTS (3x3 không thua, bảng W/D/L, W/N tại gốc)
 │   ├── rollout.py            # Các policy chọn nước đi trong rollout
@@ -36,7 +36,7 @@ TicTacToe/
 - `game.py`: quản lý trạng thái, nước đi hợp lệ, kiểm tra thắng/hòa, copy trạng thái, API cho AI.
 - `gui.py`: vẽ bàn cờ, xử lý chuột, hiển thị lượt đi, trạng thái thắng/hòa, hỗ trợ chế độ người vs người và người vs AI.
 - `ai_controller.py`: lớp trung gian để GUI không phụ thuộc vào thuật toán cụ thể.
-- `minimax.py`: placeholder để tích hợp Minimax.
+- `minimax.py`: Minimax + alpha-beta.
 - `mcts.py`: MCTS + UCT (`MCTSAgent`), đã tích hợp vào `ai_controller.py`; `verify_mcts.py`: script kiểm chứng và xuất bảng số liệu.
 - `rollout.py`: các chính sách rollout `random` và `heuristic`; đây là chiến lược chọn nước đi trong mô phỏng MCTS, không phải thuật toán AI riêng.
 - `test_game.py` và `test_gui.py`: kiểm thử chức năng cơ bản và GUI.

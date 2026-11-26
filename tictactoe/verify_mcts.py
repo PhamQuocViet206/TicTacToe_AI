@@ -47,7 +47,7 @@ OPPONENT_SEED_OFFSET = 10_000
 
 
 class OpponentUnavailable(RuntimeError):
-    """The requested opponent cannot be used (e.g. MinimaxAI not implemented yet)."""
+    """The requested opponent cannot be used."""
 
 
 # ---------------------------------------------------------------- opponents
@@ -126,7 +126,7 @@ def make_opponent(name: str, seed: int, board_size: int = 3, k: int = 3, iterati
             player.get_move(TicTacToeGame(board_size=board_size, win_length=k))
         except NotImplementedError as exc:
             raise OpponentUnavailable(
-                f"MinimaxAI is not implemented yet ({exc}). Use '--opponent perfect' for the optimal 3x3 opponent."
+                f"MinimaxAI could not play a probe move ({exc})."
             ) from exc
         return player
     raise OpponentUnavailable(f"Unknown opponent '{name}'. Choose from {OPPONENTS}.")

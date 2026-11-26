@@ -44,6 +44,21 @@ class TicTacToeGUITests(unittest.TestCase):
         self.assertEqual(self.gui.game.moves_count, 0)
         self.assertIsNone(self.gui.game.last_move)
 
+    def test_custom_board_size(self):
+        self.gui.board_size_var.set("5")
+        self.gui._set_board_size()
+        self.assertEqual(self.gui.game.board_size, 5)
+        self.assertEqual(len(self.gui.game.board), 5)
+
+        self.gui._select_board_size(10)
+        self.assertEqual(self.gui.game.board_size, 10)
+        self.assertEqual(len(self.gui.game.board), 10)
+
+        self.gui.board_size_var.set("15")
+        self.gui._set_board_size()
+        self.assertEqual(self.gui.game.board_size, 15)
+        self.assertEqual(len(self.gui.game.board), 15)
+
     def test_selects_an_ai_for_each_player(self):
         self.gui.mode_var.set("AI vs AI")
         self.gui.ai_var.set("random")
@@ -164,6 +179,9 @@ class TicTacToeGUITests(unittest.TestCase):
         self.gui.game.current_player = 1
 
         self.gui._run_ai_turn()
+        if self.gui._ai_worker is not None:
+            self.gui._ai_worker.join(timeout=2.0)
+        self.root.update()
 
         # AI X move duration should have been recorded
         self.assertEqual(len(self.gui.ai_x_move_times), 1)
@@ -193,6 +211,80 @@ class TicTacToeGUITests(unittest.TestCase):
         self.gui._toggle_advanced_x()
         self.assertFalse(self.gui.advanced_x_expanded)
         self.assertTrue(self.gui.advanced_o_expanded)
+
+    def test_minimax_advanced_settings_x_and_o(self):
+        self.gui.mode_var.set("AI vs AI")
+        self.gui.ai_var.set("minimax")
+        self.gui.minimax_depth_var.set("3")
+        self.gui.minimax_max_nodes_var.set("5000")
+        self.gui.minimax_time_limit_var.set("0.5")
+        self.gui.minimax_alpha_beta_var.set(False)
+
+        self.gui.ai_o_var.set("minimax")
+        self.gui.minimax_o_depth_var.set("Auto")
+        self.gui.minimax_o_max_nodes_var.set("Không giới hạn")
+        self.gui.minimax_o_time_limit_var.set("Không giới hạn")
+        self.gui.minimax_o_alpha_beta_var.set(True)
+
+        self.gui.game.current_player = 1
+        ctrl_x = self.gui._controller_for_current_player()
+        self.assertEqual(ctrl_x.algorithm, "minimax")
+        self.assertEqual(ctrl_x.depth, 3)
+        self.assertEqual(ctrl_x.max_nodes, 5000)
+        self.assertAlmostEqual(ctrl_x.time_limit, 0.5)
+        self.assertFalse(ctrl_x.alpha_beta)
+
+        self.gui.game.current_player = -1
+        ctrl_o = self.gui._controller_for_current_player()
+        self.assertEqual(ctrl_o.algorithm, "minimax")
+        self.assertIsNone(ctrl_o.depth)
+        self.assertIsNone(ctrl_o.max_nodes)
+        self.assertIsNone(ctrl_o.time_limit)
+        self.assertTrue(ctrl_o.alpha_beta)
+
+    def test_advanced_panel_distinguishes_minimax_mcts_and_random(self):
+        def collect_texts(widget):
+            texts = []
+            try:
+                text = widget.cget("text")
+                if text:
+                    texts.append(str(text))
+            except Exception:
+                pass
+            for child in widget.winfo_children():
+                texts.extend(collect_texts(child))
+            return texts
+
+        self.gui.mode_var.set("Human vs AI")
+        self.gui.advanced_expanded = True
+
+        self.gui.ai_var.set("minimax")
+        self.root.update()
+        minimax_texts = collect_texts(self.gui.dynamic_frame)
+        self.assertTrue(any("Độ sâu tìm kiếm" in t for t in minimax_texts))
+        self.assertTrue(any("Cắt tỉa Alpha-Beta" in t for t in minimax_texts))
+        self.assertFalse(any("Rollout Policy" in t for t in minimax_texts))
+
+        self.gui.ai_var.set("mcts")
+        self.root.update()
+        mcts_texts = collect_texts(self.gui.dynamic_frame)
+        self.assertTrue(any("Rollout Policy" in t for t in mcts_texts))
+        self.assertFalse(any("Độ sâu tìm kiếm" in t for t in mcts_texts))
+
+        self.gui.ai_var.set("random")
+        self.root.update()
+        random_texts = collect_texts(self.gui.dynamic_frame)
+        self.assertFalse(any("Độ sâu tìm kiếm" in t for t in random_texts))
+        self.assertFalse(any("Rollout Policy" in t for t in random_texts))
+        self.assertFalse(any("Cài đặt" in t for t in random_texts))
+
+    def test_sidebar_has_vertical_scrollbar(self):
+        self.root.update_idletasks()
+        self.assertTrue(hasattr(self.gui, "sidebar_canvas"))
+        self.assertTrue(hasattr(self.gui, "sidebar_scrollbar"))
+        self.assertEqual(str(self.gui.sidebar_scrollbar.cget("orient")), "vertical")
+        scrollregion = self.gui.sidebar_canvas.cget("scrollregion")
+        self.assertTrue(bool(scrollregion))
 
 
 if __name__ == "__main__":

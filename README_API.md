@@ -98,17 +98,21 @@ Tham số không hợp lệ ném `ValueError`. `AIController` bắt lỗi này, 
 
 Các thuật toán có thể tích hợp:
 
-- `tictactoe.minimax.MinimaxAI` (chưa cài đặt)
+- `tictactoe.minimax.MinimaxAI` (Minimax + alpha-beta)
 - `tictactoe.mcts.MCTSAgent` (đã tích hợp)
 
 ### Ví dụ giao tiếp với GUI
 
 ```python
-controller = AIController(algorithm="minimax")
+controller = AIController(
+    algorithm="minimax",
+    depth=4,          # None: bàn <=5 dùng tìm kiếm đầy đủ; bàn lớn mặc định độ sâu 3
+    alpha_beta=True,  # False để chạy pure minimax
+)
 move = controller.get_move(game)
 ```
 
-Nếu thuật toán chưa được triển khai, `controller.get_move()` trả về `None` và ghi trạng thái rõ ràng bằng `last_status`.
+`max_nodes` và `time_limit` chỉ là giới hạn tùy chọn. Khi không truyền, Minimax không bị cắt do số nút hoặc thời gian; giới hạn như vậy không làm thay đổi kết quả đúng nghĩa của nhánh đã cấu hình. Các hàm `minimax()`, `alpha_beta()` và `alphabeta()` có thể gọi độc lập và không còn trùng tên với cấu hình boolean.
 
 ## 4. API GUI
 
@@ -126,7 +130,7 @@ gui = TicTacToeGUI()
 
 ### AI vs AI tournament
 
-Trong GUI, chọn `AI vs AI`, chọn thuật toán riêng cho X và O, nhập số ván rồi nhấn `Start AI Matches`. Kết quả được cộng dồn theo quân X/O và hiển thị số trận thắng, tỷ lệ thắng và hòa trên số ván đã hoàn tất. Người đi trước được chọn qua `First player` và giữ cố định trong loạt. Có thể nhấn `Stop AI Matches` để dừng sớm. Chỉ thuật toán đã triển khai mới hoàn tất được (hiện là Random và MCTS); thuật toán placeholder dừng loạt với thông báo trạng thái.
+Trong GUI, chọn `AI vs AI`, chọn thuật toán riêng cho X và O, nhập số ván rồi nhấn `Start AI Matches`. Kết quả được cộng dồn theo quân X/O và hiển thị số trận thắng, tỷ lệ thắng và hòa trên số ván đã hoàn tất. Người đi trước được chọn qua `First player` và giữ cố định trong loạt. Có thể nhấn `Stop AI Matches` để dừng sớm. Random, Minimax và MCTS đều là thuật toán đã tích hợp.
 
 ## 5. Ví dụ phát triển AI tự do
 
