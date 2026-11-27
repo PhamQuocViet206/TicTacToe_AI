@@ -29,11 +29,11 @@ from typing import Dict, List, Optional, Sequence, Tuple
 try:
     from .constants import EMPTY, PLAYER_O, PLAYER_X
     from .game import TicTacToeGame
-    from .rollout import RolloutPolicy, random_rollout
+    from .rollout import RolloutPolicy, _is_winning_move, random_rollout
 except ImportError:  # pragma: no cover
     from constants import EMPTY, PLAYER_O, PLAYER_X
     from game import TicTacToeGame
-    from rollout import RolloutPolicy, random_rollout
+    from rollout import RolloutPolicy, _is_winning_move, random_rollout
 
 Move = Tuple[int, int]
 
@@ -161,7 +161,8 @@ class MCTSAgent:
     # ------------------------------------------------------------------ search
     def get_move(self, game: TicTacToeGame) -> Optional[Move]:
         """Search from ``game`` (never modified) and return the chosen move, or None if the game is over."""
-        if game.is_terminal() or not game.get_valid_moves():
+        valid_moves = game.get_valid_moves()
+        if game.is_terminal() or not valid_moves:
             self._root = None
             self.last_stats = self._stats(iterations=0, time_s=0.0, best_by_n=None, best_by_wn=None,
                                           warnings=["Game is over: no move to search."])
@@ -169,7 +170,19 @@ class MCTSAgent:
 
         start = time.perf_counter()
         radius = self._effective_radius(game)
-        root_moves = candidate_moves(game, radius)
+        root_moves = list(candidate_moves(game, radius))
+
+        player = game.current_player
+        winning_moves = [move for move in valid_moves if _is_winning_move(game, move, player)]
+        if winning_moves:
+            priority_moves = winning_moves
+        else:
+            priority_moves = [move for move in valid_moves if _is_winning_move(game, move, -player)]
+
+        for move in priority_moves:
+            if move not in root_moves:
+                root_moves.append(move)
+
         self._root = Node(None, None, -game.current_player, list(root_moves))
         self._tree_size = 1
 
@@ -180,9 +193,9 @@ class MCTSAgent:
             return move
 
         for _ in range(self.iterations):
-            self._iterate(self._root, game, radius)
+            self._iterate(self._root, game, radius, priority_moves)
 
-        by_n, by_wn = self._pick_final(self._root)
+        by_n, by_wn = self._pick_final(self._root, priority_moves)
         chosen = by_n if self.final_policy == "max_n" else by_wn
         warnings = []
         if self.iterations < len(root_moves):
@@ -194,7 +207,13 @@ class MCTSAgent:
                                       best_by_n=by_n.move, best_by_wn=by_wn.move, warnings=warnings)
         return chosen.move
 
-    def _iterate(self, root: Node, game: TicTacToeGame, radius: Optional[int]) -> None:
+    def _iterate(
+        self,
+        root: Node,
+        game: TicTacToeGame,
+        radius: Optional[int],
+        priority_moves: Optional[Sequence[Move]] = None,
+    ) -> None:
         node = root
         sim = game.copy()
 
@@ -205,7 +224,13 @@ class MCTSAgent:
 
         # 2. Expansion (a terminal node has no untried moves, so it is never expanded - MC-EC1.1)
         if node.untried:
-            move = node.untried[self.rng.randrange(len(node.untried))]
+            if node is root and priority_moves:
+                priority_set = set(priority_moves)
+                urgent = [m for m in node.untried if m in priority_set]
+                pool = urgent if urgent else node.untried
+                move = pool[self.rng.randrange(len(pool))]
+            else:
+                move = node.untried[self.rng.randrange(len(node.untried))]
             # Read the mover BEFORE make_move: game.py keeps current_player unchanged when a move ends the game.
             mover = sim.current_player
             sim.make_move(move)
@@ -236,9 +261,18 @@ class MCTSAgent:
             return 0.0
         return 0.5
 
-    def _pick_final(self, root: Node) -> Tuple[Node, Node]:
+    def _pick_final(
+        self,
+        root: Node,
+        priority_moves: Optional[Sequence[Move]] = None,
+    ) -> Tuple[Node, Node]:
         """(best by N, best by W/N). Ties: N then W/N (or W/N then N), then the seeded RNG."""
         visited = [child for child in root.children if child.N > 0]
+        if priority_moves:
+            priority_set = set(priority_moves)
+            priority_visited = [child for child in visited if child.move in priority_set]
+            if priority_visited:
+                visited = priority_visited
         by_n = self._argmax(visited, lambda ch: (ch.N, ch.W / ch.N))
         by_wn = self._argmax(visited, lambda ch: (ch.W / ch.N, ch.N))
         return by_n, by_wn

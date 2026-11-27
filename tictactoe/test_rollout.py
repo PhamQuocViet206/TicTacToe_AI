@@ -189,6 +189,72 @@ class RolloutPolicyTests(unittest.TestCase):
         self.assertGreater(tb_row["rand_iter"], 0)
         self.assertGreater(tb_row["heur_iter"], 0)
 
+    def test_mcts_root_prioritizes_immediate_win_even_with_low_iterations(self):
+        game = TicTacToeGame(board_size=15, win_length=5)
+        game.board[7][3:7] = [PLAYER_X] * 4
+        game.board[5][3:7] = [PLAYER_O] * 4
+        game.moves_count = 8
+        game.current_player = PLAYER_X
+
+        agent = MCTSAgent(iterations=2, uct_c=1.4, rollout_policy=heuristic_rollout, seed=1)
+        move = agent.get_move(game)
+        self.assertIn(move, {(7, 2), (7, 7)})
+
+    def test_mcts_root_prioritizes_single_immediate_block_with_low_iterations(self):
+        game = TicTacToeGame(board_size=15, win_length=5)
+        # O has 4-in-a-row blocked on the left at (7, 0)..(7, 3), only (7, 4) wins for O
+        game.board[7][0:4] = [PLAYER_O] * 4
+        game.board[2][2] = PLAYER_X
+        game.moves_count = 5
+        game.current_player = PLAYER_X
+
+        agent = MCTSAgent(iterations=1, uct_c=1.4, rollout_policy=heuristic_rollout, seed=1)
+        self.assertEqual(agent.get_move(game), (7, 4))
+
+    def test_mcts_root_handles_multiple_opponent_threats(self):
+        game = TicTacToeGame(board_size=15, win_length=5)
+        # O has open-4 at (7, 4)..(7, 7) -> threats at (7, 3) and (7, 8)
+        game.board[7][4:8] = [PLAYER_O] * 4
+        game.board[5][3] = PLAYER_X
+        game.board[6][3] = PLAYER_X
+        game.moves_count = 6
+        game.current_player = PLAYER_X
+
+        agent = MCTSAgent(iterations=10, uct_c=1.4, rollout_policy=heuristic_rollout, seed=1)
+        move = agent.get_move(game)
+        self.assertIn(move, {(7, 3), (7, 8)})
+
+    def test_mcts_root_detects_win_and_block_with_candidate_radius_zero(self):
+        game = TicTacToeGame(board_size=15, win_length=5)
+        game.board[7][0:4] = [PLAYER_O] * 4
+        game.board[2][2] = PLAYER_X
+        game.moves_count = 5
+        game.current_player = PLAYER_X
+
+        agent = MCTSAgent(
+            iterations=2,
+            uct_c=1.4,
+            rollout_policy=heuristic_rollout,
+            seed=1,
+            candidate_radius=0,
+        )
+        self.assertEqual(agent.get_move(game), (7, 4))
+
+    def test_extending_three_to_half_open_four_beats_single_open_three_combo(self):
+        game = TicTacToeGame(board_size=15, win_length=5)
+        # Row 7: X has half-open 3 at (7, 0), (7, 1), (7, 2) -> playing (7, 3) forms half-open 4 (4, 1) = 3500
+        game.board[7][0] = PLAYER_X
+        game.board[7][1] = PLAYER_X
+        game.board[7][2] = PLAYER_X
+        # Elsewhere at row 10: X has 2 stones at (10, 5), (10, 6) -> playing (10, 7) forms open 3 (3, 2) = 1500
+        game.board[10][5] = PLAYER_X
+        game.board[10][6] = PLAYER_X
+        game.moves_count = 5
+        game.current_player = PLAYER_X
+
+        self.assertGreater(_evaluate_move(game, (7, 3), PLAYER_X), _evaluate_move(game, (10, 7), PLAYER_X))
+        self.assertEqual(heuristic_rollout(game), (7, 3))
+
 
 if __name__ == "__main__":
     unittest.main()

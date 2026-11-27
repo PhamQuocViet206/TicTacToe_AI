@@ -27,16 +27,16 @@ Trong pha **Simulation (Rollout)** của MCTS (`MCTSAgent._iterate`), thay vì c
 | Mẫu hình chuỗi quân | Khóa `(count, open_ends)` | Điểm Tấn công (`player`) | Điểm Phòng thủ (`opponent`) | Ý nghĩa chiến thuật |
 |---|:---:|---:|---:|---|
 | Đủ chuỗi thắng ($\ge k$) | `count >= k` | `100,000` | `90,000` | Thắng ngay / Chặn thua ngay |
-| Tứ mở 2 đầu (Open 4) | `(4, 2)` | `10,000` | `9,000` | Thế thắng chắc chắn sau 1 lượt |
-| Tứ mở 1 đầu (Half-open 4) | `(4, 1)` | `1,500` | `1,200` | Nước chiếu trực tiếp buộc đối phương phải đỡ |
-| Tam mở 2 đầu (Open 3) | `(3, 2)` | `1,000` | `850` | Đe dọa tạo Tứ mở 2 đầu ở lượt kế tiếp |
+| Tứ mở 2 đầu (Open 4) | `(4, 2)` | `30,000` | `25,000` | Tạo 2 điểm thắng ở lượt kế tiếp |
+| Tứ mở 1 đầu (Half-open 4) | `(4, 1)` | `3,500` | `2,800` | Nước chiếu trực tiếp buộc đối phương phải đỡ |
+| Tam mở 2 đầu (Open 3) | `(3, 2)` | `1,500` | `1,200` | Đe dọa tạo Tứ mở 2 đầu ở lượt kế tiếp |
 | Tam mở 1 đầu (Half-open 3) | `(3, 1)` | `150` | `120` | Chuỗi 3 quân có khả năng phát triển lên 4 |
 | Nhị mở 2 đầu (Open 2) | `(2, 2)` | `50` | `40` | Khung phát triển chuỗi sớm |
 | Nhị mở 1 đầu (Half-open 2) | `(2, 1)` | `10` | `8` | Liên kết 2 quân cơ bản |
 | Đơn lẻ mở 2 phía | `(1, 2)` | `2` | `1` | Ô trống có không gian thoáng 2 bên |
 | Bị bịt kín / Hành lang $< k$ | `open_ends == 0` | `0` | `0` | Chuỗi chết, không đủ không gian tạo $k$ quân |
 
-*(Nhờ cộng tổng điểm trên cả 4 hướng đi qua ô ứng viên, các **giao điểm Đa đe dọa / Fork** như Đôi Tam mở 2 đầu đạt `1,000 + 1,000 = 2,000` điểm công hoặc `850 + 850 = 1,700` điểm thủ, tự động được ưu tiên cao hơn cả một chuỗi Tứ mở 1 đầu đơn lẻ).*
+*(Nhờ cộng tổng điểm trên cả 4 hướng đi qua ô ứng viên, các **giao điểm Đa đe dọa / Fork** như Đôi Tam mở 2 đầu đạt `1,500 + 1,500 = 3,000` điểm công hoặc `1,200 + 1,200 = 2,400` điểm thủ; trong khi nước phát triển hàng 3 lên hàng 4 mở 1 đầu `(4, 1) = 3,500` luôn cao hơn một hướng Tam mở 2 đầu đơn lẻ kèm các hướng nhỏ. Đồng thời tại nút gốc của `MCTSAgent.get_move()`, thuật toán cũng kiểm tra và ưu tiên trực tiếp nước thắng ngay hoặc chặn đối thủ thắng ngay trên toàn bộ `valid_moves`).*
 
 ---
 

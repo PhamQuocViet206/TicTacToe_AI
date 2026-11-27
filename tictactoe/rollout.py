@@ -25,9 +25,9 @@ WIN_DEFENSE_SCORE = 90_000
 # Bảng trọng số Tấn công (player) và Phòng thủ (opponent) theo (chiều dài chuỗi, số đầu mở)
 # Chuẩn hóa cho luật 5 quân liên tiếp (k = 5):
 ATTACK_WEIGHTS: Dict[Tuple[int, int], int] = {
-    (4, 2): 10_000,  # Tứ mở 2 đầu: thế thắng chắc chắn ở lượt kế
-    (4, 1): 1_500,   # Tứ mở 1 đầu: nước chiếu trực tiếp
-    (3, 2): 1_000,   # Tam mở 2 đầu: đe dọa tạo Tứ mở 2 đầu
+    (4, 2): 30_000,  # Tứ mở 2 đầu: tạo 2 điểm thắng ở lượt kế
+    (4, 1): 3_500,   # Tứ mở 1 đầu: nước chiếu trực tiếp buộc đối thủ đỡ
+    (3, 2): 1_500,   # Tam mở 2 đầu: đe dọa tạo Tứ mở 2 đầu
     (3, 1): 150,     # Tam mở 1 đầu: tiềm năng phát triển
     (2, 2): 50,      # Nhị mở 2 đầu: khung phát triển chuỗi sớm
     (2, 1): 10,      # Nhị mở 1 đầu: liên kết cơ bản
@@ -35,9 +35,9 @@ ATTACK_WEIGHTS: Dict[Tuple[int, int], int] = {
 }
 
 DEFENSE_WEIGHTS: Dict[Tuple[int, int], int] = {
-    (4, 2): 9_000,   # Chặn Tứ mở 2 đầu của đối thủ
-    (4, 1): 1_200,   # Chặn Tứ mở 1 đầu của đối thủ
-    (3, 2): 850,     # Chặn Tam mở 2 đầu của đối thủ
+    (4, 2): 25_000,  # Chặn Tứ mở 2 đầu của đối thủ
+    (4, 1): 2_800,   # Chặn Tứ mở 1 đầu của đối thủ
+    (3, 2): 1_200,   # Chặn Tam mở 2 đầu của đối thủ
     (3, 1): 120,     # Chặn Tam mở 1 đầu của đối thủ
     (2, 2): 40,      # Chặn Nhị mở 2 đầu của đối thủ
     (2, 1): 8,       # Chặn Nhị mở 1 đầu của đối thủ
