@@ -19,29 +19,23 @@ DIRECTIONS: Tuple[Tuple[int, int], ...] = ((1, 0), (0, 1), (1, 1), (1, -1))
 SMALL_BOARD_MAX = 3
 CANDIDATE_RADIUS = 1
 
-WIN_ATTACK_SCORE = 100_000
-WIN_DEFENSE_SCORE = 90_000
-
-# Bảng trọng số Tấn công (player) và Phòng thủ (opponent) theo (chiều dài chuỗi, số đầu mở)
-# Chuẩn hóa cho luật 5 quân liên tiếp (k = 5):
+# Bảng trọng số 6 mức theo (chiều dài chuỗi, số đầu mở) cho luật thắng 5 quân (win_length = 5)
 ATTACK_WEIGHTS: Dict[Tuple[int, int], int] = {
-    (4, 2): 30_000,  # Tứ mở 2 đầu: tạo 2 điểm thắng ở lượt kế
-    (4, 1): 3_500,   # Tứ mở 1 đầu: nước chiếu trực tiếp buộc đối thủ đỡ
-    (3, 2): 1_500,   # Tam mở 2 đầu: đe dọa tạo Tứ mở 2 đầu
-    (3, 1): 150,     # Tam mở 1 đầu: tiềm năng phát triển
-    (2, 2): 50,      # Nhị mở 2 đầu: khung phát triển chuỗi sớm
-    (2, 1): 10,      # Nhị mở 1 đầu: liên kết cơ bản
-    (1, 2): 2,       # Quân đơn lẻ có không gian mở 2 phía
+    (4, 2): 10_000,  # Tứ mở 2 đầu
+    (4, 1): 2_000,   # Tứ mở 1 đầu
+    (3, 2): 800,     # Tam mở 2 đầu
+    (3, 1): 200,     # Tam mở 1 đầu
+    (2, 2): 60,      # Nhị mở 2 đầu
+    (2, 1): 15,      # Nhị mở 1 đầu
 }
 
 DEFENSE_WEIGHTS: Dict[Tuple[int, int], int] = {
-    (4, 2): 25_000,  # Chặn Tứ mở 2 đầu của đối thủ
-    (4, 1): 2_800,   # Chặn Tứ mở 1 đầu của đối thủ
-    (3, 2): 1_200,   # Chặn Tam mở 2 đầu của đối thủ
-    (3, 1): 120,     # Chặn Tam mở 1 đầu của đối thủ
-    (2, 2): 40,      # Chặn Nhị mở 2 đầu của đối thủ
-    (2, 1): 8,       # Chặn Nhị mở 1 đầu của đối thủ
-    (1, 2): 1,       # Cản hướng phát triển đơn lẻ
+    (4, 2): 8_000,   # Chặn đối thủ tạo Tứ mở 2 đầu
+    (4, 1): 1_500,   # Chặn đối thủ tạo Tứ mở 1 đầu
+    (3, 2): 600,     # Chặn đối thủ tạo Tam mở 2 đầu
+    (3, 1): 120,     # Chặn đối thủ tạo Tam mở 1 đầu
+    (2, 2): 30,      # Chặn đối thủ tạo Nhị mở 2 đầu
+    (2, 1): 10,      # Chặn đối thủ tạo Nhị mở 1 đầu
 }
 
 
@@ -104,9 +98,8 @@ def _analyze_direction(
     """Count contiguous stones and open ends if `player` places at (row, col)."""
     board = game.board
     size = game.board_size
-    win_length = game.win_length
 
-    # Đếm số quân liên tiếp theo chiều thuận (+dr, +dc)
+    # 1. Đếm số quân liên tiếp cùng loại theo chiều thuận (+dr, +dc)
     forward_count = 0
     r, c = row + dr, col + dc
     while 0 <= r < size and 0 <= c < size and board[r][c] == player:
@@ -115,7 +108,7 @@ def _analyze_direction(
         c += dc
     forward_open = 1 if (0 <= r < size and 0 <= c < size and board[r][c] == EMPTY) else 0
 
-    # Đếm số quân liên tiếp theo chiều nghịch (-dr, -dc)
+    # 2. Đếm số quân liên tiếp cùng loại theo chiều nghịch (-dr, -dc)
     backward_count = 0
     rb, cb = row - dr, col - dc
     while 0 <= rb < size and 0 <= cb < size and board[rb][cb] == player:
@@ -126,29 +119,6 @@ def _analyze_direction(
 
     count = 1 + forward_count + backward_count
     open_ends = forward_open + backward_open
-
-    # Nếu hành lang bị chặn hẹp không đủ chỗ cho win_length quân thì vô giá trị (0 đầu mở)
-    if count < win_length and open_ends > 0:
-        space = count
-        opponent = -player
-        rf, cf = r, c
-        while space < win_length and 0 <= rf < size and 0 <= cf < size and board[rf][cf] != opponent:
-            space += 1
-            rf += dr
-            cf += dc
-        r_back, c_back = rb, cb
-        while (
-            space < win_length
-            and 0 <= r_back < size
-            and 0 <= c_back < size
-            and board[r_back][c_back] != opponent
-        ):
-            space += 1
-            r_back -= dr
-            c_back -= dc
-        if space < win_length:
-            return count, 0
-
     return count, open_ends
 
 
@@ -188,30 +158,20 @@ def _is_winning_move(game: TicTacToeGame, move: Move, player: int) -> bool:
     return False
 
 
-def _score_direction(count: int, open_ends: int, win_length: int, is_attack: bool) -> int:
+def _score_direction(count: int, open_ends: int, is_attack: bool) -> int:
     """Look up tactical weight for a single direction based on chain length and open ends."""
-    if count >= win_length:
-        return WIN_ATTACK_SCORE if is_attack else WIN_DEFENSE_SCORE
-    if open_ends <= 0:
+    if count < 2 or open_ends <= 0:
         return 0
-
-    # Chuẩn hóa chiều dài chuỗi theo mốc k = 5 để tương thích mọi win_length (ví dụ k = 3 hoặc k = 5)
-    if count == 1:
-        effective_count = 1
-    else:
-        effective_count = max(2, min(4, count + (5 - win_length)))
-
     weights = ATTACK_WEIGHTS if is_attack else DEFENSE_WEIGHTS
-    return weights.get((effective_count, open_ends), 0)
+    return weights.get((min(count, 4), open_ends), 0)
 
 
 def _evaluate_move(game: TicTacToeGame, move: Move, player: int) -> int:
-    """Compute combined attack, defense, and center-proximity score for a candidate move."""
+    """Compute combined attack and defense score across all four directions for a candidate move."""
     row, col = move
     board = game.board
     size = game.board_size
     opponent = -player
-    win_length = game.win_length
     total_score = 0
 
     for dr, dc in DIRECTIONS:
@@ -222,30 +182,26 @@ def _evaluate_move(game: TicTacToeGame, move: Move, player: int) -> int:
 
         if v1 == player or v2 == player:
             atk_count, atk_open = _analyze_direction(game, row, col, dr, dc, player)
-            total_score += _score_direction(atk_count, atk_open, win_length, is_attack=True)
-        elif v1 == EMPTY and v2 == EMPTY:
-            total_score += ATTACK_WEIGHTS[(1, 2)]
+            total_score += _score_direction(atk_count, atk_open, is_attack=True)
 
         if v1 == opponent or v2 == opponent:
             def_count, def_open = _analyze_direction(game, row, col, dr, dc, opponent)
-            total_score += _score_direction(def_count, def_open, win_length, is_attack=False)
-        elif v1 == EMPTY and v2 == EMPTY:
-            total_score += DEFENSE_WEIGHTS[(1, 2)]
+            total_score += _score_direction(def_count, def_open, is_attack=False)
 
-    center = size // 2
-    distance = max(abs(row - center), abs(col - center))
-    center_bonus = max(0, min(3, center - distance))
-    return total_score + center_bonus
+    return total_score
 
 
 def heuristic_rollout(game: TicTacToeGame) -> Optional[Move]:
     """Select a rollout move using tactical priority rules and line-potential scoring.
 
-    Priority order:
-    1. Immediate win for the current player.
-    2. Block immediate opponent win (if multiple threats exist, pick the highest-rated block).
-    3. Maximize combined attack + defense line potential across all four directions.
+    Steps:
+    1. Filter candidate moves near existing stones (Position).
+    2. Take immediate win for the current player if available.
+    3. Block immediate opponent win if available (break ties using _evaluate_move).
+    4. Score all candidates by Attack + Defense across four directions.
+    5. Randomly choose among candidates tied for the highest score.
     """
+    # Bước 1: Lọc ứng viên theo vị trí (Position)
     candidates = _get_candidate_moves(game)
     if not candidates:
         return None
@@ -253,28 +209,19 @@ def heuristic_rollout(game: TicTacToeGame) -> Optional[Move]:
     player = game.current_player
     opponent = -player
 
-    # 1. Ưu tiên nước thắng ngay lập tức cho người chơi hiện tại
+    # Bước 2: Thắng ngay cho người chơi hiện tại
     winning_moves = [move for move in candidates if _is_winning_move(game, move, player)]
     if winning_moves:
         return random.choice(winning_moves)
 
-    # 2. Chặn nước thắng ngay của đối thủ (xử lý cả trường hợp có nhiều mối đe dọa)
+    # Bước 3: Chặn đối thủ thắng ngay
     blocking_moves = [move for move in candidates if _is_winning_move(game, move, opponent)]
     if len(blocking_moves) == 1:
         return blocking_moves[0]
     if len(blocking_moves) > 1:
-        best_block_score = -1
-        best_blocks: List[Move] = []
-        for move in blocking_moves:
-            score = _evaluate_move(game, move, player)
-            if score > best_block_score:
-                best_block_score = score
-                best_blocks = [move]
-            elif score == best_block_score:
-                best_blocks.append(move)
-        return random.choice(best_blocks)
+        candidates = blocking_moves
 
-    # 3. Đánh giá tiềm năng phát triển chuỗi quân và chặn đa đe dọa (fork)
+    # Bước 4 & Bước 5: Đánh giá chiến thuật (Attack + Defense) và chọn ngẫu nhiên trong nhóm điểm cao nhất
     best_score = -1
     best_moves: List[Move] = []
     for move in candidates:
